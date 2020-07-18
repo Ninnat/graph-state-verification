@@ -1,14 +1,15 @@
-# Module for verification of stabilizer/graph states
+# Module for verification of graph states
 
 import numpy as np
-from scipy.optimize import linprog
 import cvxpy as cp
+import networkx as nx
+import itertools as it
+import matplotlib.pyplot as plt
 from math import log, ceil, floor
 from fractions import Fraction
 
 from graph_library import graphState # relative import
-import networkx as nx
-import matplotlib.pyplot as plt
+
 
 #-----------------------------------------------------------------------------------------------------------
 
@@ -16,13 +17,14 @@ import matplotlib.pyplot as plt
 def GHZ(n):
     A = np.ones([n,n])
     A[-(n-1):,-(n-1):] = 0
-    return(A)
+    A[0,0] = 0
+    return(A) 
 
 # Adjacency matrix of the n-qubit linear cluster state
 def cluster1D(n):
     return (np.diag(np.ones(n-1),1) + np.diag(np.ones(n-1),-1))
 
-# Adjacency matrix of the n-qubit ring state (linear cluster state with periodic boundary)
+# Adjacency matrix of the n-qubit ring state (linear cluster state with periodic boundary) 
 def ring(n):
     A = cluster1D(n)
     A[0,-1] += 1
@@ -31,295 +33,250 @@ def ring(n):
 
 #-----------------------------------------------------------------------------------------------------------
 
-# Output binary symplectic vectors + phase bits of all stabilizers of a graph state defined by the adjacency matrix A
-def stab_table(A):
-    n = A.shape[0]
-    pcheck = np.concatenate((np.diag(np.ones(n)),A),axis=1) # parity-check matrix
-    v = [[] for j in range(2**n)]
-    j = 0
-    while j < 2**n:
-        v[j] = np.zeros(2*n) # each binary symplectic vector
-        q = bin(j)
-        p = q[2:].zfill(n)
-        # add a stabilizer generator whenever the corresponding value in the binary j index is 1
-        genlist = [j for j, x in enumerate(p) if x == '1']
-        for gen in genlist:
-            v[j] = np.remainder((v[j] + pcheck[-1-gen,:]),2)
-        j += 1
-    return(v)
-
-# Enumerate binary symplectic vectors: https://stackoverflow.com/questions/2267362/how-to-convert-an-integer-in-any-base-to-a-string
-def int_to_symplec(j,n,XZ = None):
-    if j == 0:
-        return ([0]*n + [1]*n)
+def intToSymplec(j, n):
     vec = [0]*n + [1]*n # symplectic vector (X,Z)
     k = 0
-    if XZ == 1:
-        while j:
-            if int(j % 2) == 0:
-                vec[-1-n-k],vec[-1-k] = 0,1
-            if int(j % 2) == 1:
-                vec[-1-n-k],vec[-1-k] = 1,0
-            j //= 2
-            k += 1
-    else:
-        while j:
-            if int(j % 3) == 0:
-                vec[-1-n-k],vec[-1-k] = 0,1
-            if int(j % 3) == 1:
-                vec[-1-n-k],vec[-1-k] = 1,0
-            if int(j % 3) == 2:
-                vec[-1-n-k],vec[-1-k] = 1,1
-            j //= 3
-            k += 1
+    while j:
+        if int(j % 3) == 0:
+            vec[-1-n-k],vec[-1-k] = 0,1
+        if int(j % 3) == 1:
+            vec[-1-n-k],vec[-1-k] = 1,0
+        if int(j % 3) == 2:
+            vec[-1-n-k],vec[-1-k] = 1,1
+        j //= 3
+        k += 1
     return(vec)
 
-def check_local(u,v,n):
-    j = 0
-    while j < n:
-        if (u[j] == v[j] and u[j+n] == v[j+n]) or (u[j] == 0 and u[j+n] == 0) or (v[j] == 0 and v[j+n] == 0):
-            j += 1
-        else: j = n+1
-    if j == n:
-        return('Yes')
-    else: return('No')
 
-# Output all locally measurable stabilizer codes of a graph state defined by the adjacency matrix A
-def local_subgroups(A,XZ = None):
-    stat = stab_table(A)
-    n = A.shape[0]
-    j = 0
-    lst = []
-    if XZ == 1:
-        m = 2**n
-    else:
-        m = 3**n
-
-    while j < m: #loop over Pauli strings
-        k = 1
-        code = []
-        while k < 2**n: #loop over the stabilizers
-            if check_local(int_to_symplec(j,n,XZ),stat[k],n) == 'Yes':
-                code.append(k)
-            k += 1
-        code.append(j) # Keep the Pauli string at the end of the subgroup
-        lst.append(code)
-        j += 1
-
-    filt = [x for x in lst if not any(set(x[:-1]) <= set(y[:-1]) for y in lst if x is not y)] # https://stackoverflow.com/a/1319083
-
-    for x in filt:
-        vec = int_to_symplec(x[-1],n,XZ)
-        tervec = []
-        l = 0
-        while l < n:
-            tervec.append(int(2*vec[l] + vec[l+n]))
-            l += 1
-        x[-1] = str_to_pauli(''.join(str(x) for x in tervec))
-    return(sorted(filt, key=len, reverse=True))
-
-def str_to_pauli(s): # https://codereview.stackexchange.com/a/183660
-    pauli = {'0':'I','1':'Z','2':'X','3':'Y'}
-    paulistr = [pauli[char] for char in s]
-    return ''.join(paulistr)
-
-
-#-----------------------------------------------------------------------------------------------------------
-
-# Group theory
-
-# Character table
-def char_table(n):
-    T = np.zeros(shape=(2**n-1,2**n))
-    j = 1
-    while j < 2**n:
-        k = 0
-        while k < 2**n:
-            row,col = np.unpackbits(np.array([j], dtype=np.uint32).view(np.uint8)[::-1]), np.unpackbits(np.array([k], dtype=np.uint32).view(np.uint8)[::-1]) # 32 qubits maximum
-            T[j-1,k] += (-1)**(np.dot(row,col))
-            k += 1
-        j += 1
-    return(T)
-
-# 0-1 character table
-def bin_char_table(n):
-    T = np.zeros(shape=(2**n-1,2**n))
-    j = 1
-    while j < 2**n:
-        k = 0
-        while k < 2**n:
-            row, col = np.unpackbits(np.array([j], dtype=np.uint32).view(np.uint8)[::-1]), np.unpackbits(np.array([k], dtype=np.uint32).view(np.uint8)[::-1]) # 32 qubits maximum
-            T[j-1,k] += 1 - np.remainder(np.dot(row,col),2)
-            k += 1
-        j += 1
-    return(T)
-
-# This is the (2^n)-1 x m (locally measurable subgroups) matrix to be use in the linear program
-def sub_char_table(T,subgrp):
-    m = len(subgrp) # number of locally measurable subgroups
-    n = T.shape[0] # 2^n-1
-    A = np.ones((n,m)) # The 1's is for the identity in the sum
+def intToPauli(j, n):
+    pauli = ['Z']*n
     k = 0
-    while k < m:
-        for l in subgrp[k][:-1]:
-            A[:,k] += T[:,l]
-        A[:,k] = A[:,k]/(len(subgrp[k][:-1]) + 1) # normalize by the subgroup's order
+    while j:
+        if int(j % 3) == 0:
+            pauli[-1-k] = 'Z'
+        if int(j % 3) == 1:
+            pauli[-1-k] = 'X'
+        if int(j % 3) == 2:
+            pauli[-1-k] = 'Y'
+        j //= 3
         k += 1
-    return(A)
+    return(''.join(pauli))
 
-def eigen_table(A,XZ = None):
-    local = local_subgroups(A,XZ)
-    return(local,sub_char_table(char_table(A.shape[0]),local))
+#-----------------------------------------------------------------------------------------------------------  
+# Test projectors
 
-#-----------------------------------------------------------------------------------------------------------
+def localCommutator(A):
+    n = A.shape[0]
+    symplec = np.array([intToSymplec(j,n) for j in range(3**n)])
+    
+    Z = np.zeros((*symplec[:,n:].shape, symplec[:,n:].shape[-1]), symplec[:,n:].dtype)
+    np.einsum('...jj->...j', Z)[...] = symplec[:,n:] # einsum magic https://stackoverflow.com/questions/48627163/construct-n1-dimensional-diagonal-matrix-from-values-in-n-dimensional-array
+    X = np.multiply(symplec[:,:n][:,:,None],A)
+    
+    return(Z + X)
 
-# Optimization
+def unpackbits(x,n): # np.unpackbits but for an arbitrary number of bits https://stackoverflow.com/a/51509307/13049108
+    xshape = list(x.shape)
+    x = x.reshape([-1, 1])
+    mask = 2**np.arange(n)[::-1].reshape([1, n])
+    return (x & mask).astype(bool).astype(int).reshape(xshape + [n])
 
-def k_to_n(k):
-    if k <= 3:
-        n = k+1
-    elif k == 4:
-        n = 4
-    elif k < 9:
-        n = 5
-    elif k < 20:
-        n = 6
-    else: n = 7
-    return(n)
+def rspan(local):
+    n = local[0].shape[1]
+    i = np.array([j for j in range(2**n)]) 
+    # bin_matrix = np.unpackbits(i, axis=1)[:,-n:] # up to 8 qubits
+    bin_matrix = unpackbits(i, n)
+    return(np.matmul(bin_matrix,local)%2)
 
 
-def optimal(A): # A = eigentable
-    n,m = len(A[0]),len(A[1]) # n = number of local subgroups, m = (2**N)-1
-    x = cp.Variable()
-    p = cp.Variable(shape=n,nonneg = True)
-    constraints = [cp.sum(p) == 1] # Probabilities add up to 1
+def testMat(adm):
+    n = len(adm[0][1])
+    m = len(adm)
+    C = [i[0] for i in adm]
+    testmat = np.array([[0]*(2**n)]*m)
     j = 0
     while j < m:
+        for k in C[j]:
+            testmat[j][k] = 1
+        j += 1
+    return(np.transpose(testmat))
+
+
+def admissible(A): # A = adjacency matrix
+    n = A.shape[0]
+    B = localCommutator(A)   
+    paulis = [intToPauli(j, n) for j in range(3**n)]
+    
+    # eliminate trivial tests
+    condition = [np.linalg.det(x)%2 < 1e-10 or (2-np.linalg.det(x))%2 < 1e-10 for x in B]
+    rank_def = list(it.compress(B,condition))
+    rank_def_paulis = list(it.compress(paulis,condition))
+    
+    # convert row span to position of 1's in test vector
+    bit_converter = 2**np.arange(n-1,-1,-1)
+    testvec = (rspan(rank_def).dot(bit_converter)).astype(int)
+    testvec2 = [set(x) for x in testvec]
+    testsort, paulisort = zip(*sorted(zip(testvec2,rank_def_paulis),key=lambda x: len(x[0]))) # https://stackoverflow.com/questions/38240236/python-sorting-a-zip-based-on-length-and-weight
+
+    # filter admissible projectors by rank
+    index = [index for index, (item,group) in enumerate(it.groupby(testsort,len))]
+    test = [[j for j in group] for index, (item, group) in enumerate(it.groupby(testsort,len))]
+    j = 1
+    while j <= max(index):
+        test[j] = [set(i) for i in set(frozenset(i) for i in test[j])]
+        j += 1
+    j = 0
+    while j < max(index):
+        k = j+1
+        while k <= max(index):
+            test[k] = [x for x in test[k] if not any(x >= y for y in test[j])]
+            k += 1
+        j += 1 
+    adm = test[0]
+    j = 1
+    while j <= max(index):
+        adm += test[j]
+        j += 1
+    adm_pair = [x for x in list(zip(testsort,paulisort)) if x[0] in adm]
+    return(adm_pair,testMat(adm_pair)[1:])
+
+        
+#-----------------------------------------------------------------------------------------------------------
+# Optimization
+
+
+def optimal(test): # test matrix (of 0-1 eigenvalues)
+    N,m = test.shape[0], test.shape[1]
+    x = cp.Variable()
+    p = cp.Variable(shape = m, nonneg = True)
+    constraints = [cp.sum(p) == 1]
+    j = 0
+    while j < N:  
         constraints += [
-            (A[1]*p)[j] - x <= 0,
-            -(A[1]*p)[j] - x <= 0
+            (test*p)[j] - x <= 0,
+            -(test*p)[j] - x <= 0
         ]
         j += 1
     obj = cp.Minimize(x)
     prob = cp.Problem(obj,constraints)
-    prob.solve(solver = cp.GLPK, verbose = False)
+    prob.solve(solver = cp.GLPK)
     print("status:", prob.status)
     print("optimal value", prob.value)
     print("optimal var", p.value)
 
-def min_settings(A,gap): # A = eigentable
+def minSet(test,gap): # A = eigentable
+    
+    m = test.shape[1]
+    
     # https://www.cvxpy.org/examples/applications/sparse_solution.html#iterative-log-heuristic
-
-    n = len(A[0]) # len(A[0]) = number of local subgroups
-    # The threshold value below which we consider an element to be zero.
-    delta = 1e-8
-    # Do 10 iterations, allocate variable to hold number of non-zeros
-    # (cardinality of p) for each run.
+    delta = 1e-8 # threshold for 0
     NUM_RUNS = 30
-    nnzs_log = np.array(())
+    nnzs_log = np.array(()) # (cardinality of p) for each run
 
-    W = cp.Parameter(shape=n, nonneg=True);
-    p = cp.Variable(shape=n, nonneg=True)
+    W = cp.Parameter(shape = m, nonneg=True);
+    p = cp.Variable(shape = m, nonneg=True)
 
-    # Initial weights.
-    W.value = np.ones(n);
+    W.value = np.ones(m);  # Initial weights
 
     obj = cp.Minimize( W.T*cp.abs(p) )
-    constraints = [cp.sum(p) == 1, A*p <= 1-gap]
+    constraints = [cp.sum(p) == 1, test*p <= 1-gap]
     prob = cp.Problem(obj, constraints)
 
     for k in range(1, NUM_RUNS+1):
+        # The ECOS solver has known numerical issues with this problem
+        # so force a different solver.
         prob.solve(solver=cp.GLPK)
 
+        # Check for error.
         if prob.status != cp.OPTIMAL:
             raise Exception("Solver did not converge!")
 
         # Display new number of nonzeros in the solution vector.
         nnz = (np.absolute(p.value) > delta).sum()
         nnzs_log = np.append(nnzs_log, nnz);
+        # print('Iteration {}: Found a feasible p in R^{}'
+        #      ' with {} nonzeros...'.format(k, n, nnz))
+
         # Adjust the weights elementwise and re-iterate
-        W.value = np.ones(n)/(delta*np.ones(n) + np.absolute(p.value))
+        W.value = np.ones(m)/(delta*np.ones(m) + np.absolute(p.value))
     return(p.value,nnz)
-
-def auto_graph(k,gap,XZ = None): # k = graph label
-
-    n = k_to_n(k)
-
-    graph = graphState(k)
-    A = nx.to_numpy_array(graph,nodelist=sorted(graph.nodes()))
-    [B,C] = eigen_table(A,XZ)
-
-    print(k)
-    plt.figure(k) # produce a seperate plot for each graph
-    nx.draw(graph,node_size=1000,node_color='xkcd:salmon',with_labels = True)
-    plt.show()
-
-    Min = min_settings(C,gap)[0]
-    print(Min)
-    nonzeroPos = [j for j, y in enumerate(Min) if y > 1e-10] # only display probabilities significantly away from zero
-    for j in nonzeroPos:
-        print('{} of {} rank {} measuring {}'.format( Fraction(Min[j]).limit_denominator() , [bin(x)[2:].zfill(n) for x in B[j][:-1]] , int( (2**n)/(len(B[j][:-1])+1)), B[j][-1] ))
-    return()
-
-def is_homogeneous(A): # A = eigentable
-    n,m = len(A[0]),len(A[1]) # n = number of local subgroups, m = (2**N)-1
-    x = cp.Variable()
-    p = cp.Variable(shape=n, nonneg = True)
-    constraints = [cp.sum(p) == 1,(A[1]*p)[0] - x <= 0, -(A[1]*p)[0] - x <= 0]
-    j = 1
-    while j < m:
-        constraints += [
-            (A[1]*p)[j] == (A[1]*p)[j-1]
-        ]
-        j += 1
-    obj = cp.Minimize(x)
-    prob = cp.Problem(obj,constraints)
-    prob.solve(solver = cp.ECOS, verbose = False)
-    print("status:", prob.status)
-    print("optimal value", prob.value)
-    print("optimal var", p.value)
-
-def random(k,M,iteration,XZ = None): # k = graph label, M = number of settings
-
-    n = k_to_n(k)
-
-    graph = graphState(k)
-    A = nx.to_numpy_array(graph,nodelist=sorted(graph.nodes()))
-    [B,C] = eigen_table(A,XZ)
-    m = len(B)
-    l = 0
-    while l < iteration:
-        ran = np.random.choice(m,size=M,replace=False)
-        beta = np.amax(np.mean(C[:,ran],axis=1))
-        if beta < 1:
-            print(1 - beta)
-            for j in ran:
-                print("{} measures {} generators".format(B[j][-1],int(  log(len(B[j][:-1])+1 , 2) ) ))
-            l = iteration
-        else:
-            l += 1
-    return()
-
-def all_pairs(k,XZ = None):
-
-    n = k_to_n(k)
-    graph = graphState(k)
-    A = nx.to_numpy_array(graph,nodelist=sorted(graph.nodes()))
-    [B,C] = eigen_table(A,XZ)
-    m = len(B)
-    p = 0
-    counter = 0
-    while p < m:
-        q = m-1
-        while p < q:
-            beta = np.amax((C[:,p] + C[:,q])/2)
-            if beta < 1:
-                print("{} from {} and {} of rank {} and {}".format(1 - beta, B[p][-1], B[q][-1], int( (2**n)/(len(B[p][:-1])+1)), int( (2**n)/(len(B[q][:-1])+1))))
-                q = p
-                p = m
+    
+def equiprob(adm, test, k, notAllow = None): # iterate over all verifications with k settings with equal probabilities
+    # you can put notAllow = 'I' if all Pauli settings are allowed
+    cols = [row for row in np.transpose(test)]
+    condition = [notAllow not in x[1] for x in adm]
+    cols2 = list(it.compress(cols, condition)) # list is okay here
+    adm2 = list(it.compress(adm, condition))
+    index = it.combinations(np.arange(len(cols2)),k)
+    combi = it.combinations(cols2,k)
+    verify = next((i for i,x in zip(index,combi) if np.amax(np.sum(x,axis=0)/k) < 1 ), None)
+    if verify != None:
+        for j in verify:
+            print(adm2[j])
+        return()
+    else:
+        return()
+    
+def localCover2(graph): # the minimum number of settings when each party only have two choices of Paulis
+    n = graph.number_of_nodes()
+    A = nx.to_numpy_array(graph, nodelist=sorted(graph.nodes()))
+    adm, test = admissible(A)
+    cols = [row for row in np.transpose(test)]
+    k = 2
+    while k <= n:
+        j = 0
+        while j < 3**n:
+            s = intToPauli(j,n)
+            condition = [not any(c1 == c2 for c1,c2 in zip(s, x[1])) for x in adm]
+            cols2 = list(it.compress(cols,condition))
+            combi = list(it.combinations(cols2,k))
+            if next((x for x in combi if np.amax(np.sum(x,axis=0)/k) < 1),None) != None:
+                print('tilde_chi_2 = {}; No {}'.format(k, s))
+                return(combi)
             else:
-                q -= 1
-                counter += 1
-        p += 1
-        counter += 1
-    return(counter)
+                j += 1
+        k += 1
+    return(print('Something is wrong')) # local cover number with 2 settings cannot be greater than the chromatic number
+
+def colorProt(graph0, strategy = None): # coloring protocol
+    n = graph0.number_of_nodes()
+    graph = nx.convert_node_labels_to_integers(graph0, first_label = 1)
+     
+    # sometimes the default strategy cannot come up with a minimum coloring 
+    # https://networkx.github.io/documentation/stable/reference/algorithms/generated/networkx.algorithms.coloring.greedy_color.html
+    if strategy != None: 
+        min_coloring = nx.greedy_color(graph, strategy)
+    else:
+        min_coloring = nx.greedy_color(graph)
+    colors = [min_coloring.get(color) for color in min_coloring]
+    
+    plt.figure(1)
+    nx.draw(graph, node_size=1000, font_size=20, with_labels = True, node_color = [min_coloring.get(node) for node in graph.nodes()], cmap = plt.cm.Set1, vmax = 8)
+    plt.show()
+    #plt.savefig("./img_coloring/graph-"+str(k)+".png", format="PNG", transparent = True)
+    
+    A = nx.to_numpy_array(graph, nodelist=sorted(graph.nodes()))
+    adm = admissible(A)[0]
+    
+    test = np.zeros(2**n)
+    for color in set(colors):
+        pos = [k for (k, v) in min_coloring.items() if v == color]
+        mu = np.sum([3**(n-x) for x in pos]) # these are the settings we want to construct the test vectors from
+        # graph node has to start at 1; otherwise replace x by x+1
+        pauli = intToPauli(mu, n)
+        
+        meas = rspan(localCommutator(A))[mu]
+        bit_converter = 2**np.arange(n-1,-1,-1)
+        testvec = (meas.dot(bit_converter)).astype(int)
+        testvec2 = list(set(testvec))
+        rank = len(testvec2)
+        gen = int(log((2**n)/rank, 2))
+        print('{}: rank = {}, # subgroup gen = {}, admissible? {} {}'.format(pauli, rank, gen, pauli in [x[1] for x in adm], [x[1] for x in adm if set(x[0]).issubset(testvec2) == True]))  
+        
+        testmat = [0]*(2**n)
+        for x in testvec2:
+            testmat[x] = 1
+        test += testmat 
+    print(test[1:])
+    print('nu = {}'.format(1 - Fraction(np.amax(test[1:])/len(set(colors))).limit_denominator()))
+    return()
