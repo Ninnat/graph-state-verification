@@ -26,8 +26,8 @@ A = nx.to_numpy_array(graph,nodelist=sorted(graph.nodes()))
 
 `gv.optimal(test)` outputs the optimal spectral gap and an associated (non-unique) optimal measurement scheme. The number of settings may be reduced somewhat by using `gv.minSet(test,ν)` given a fixed spectral gap ν. (Minimizing the number of settings is equivalent to minimizing an l_0 norm which is not convex, so one has to rely on a [heuristic](https://www.cvxpy.org/examples/applications/sparse_solution.html#iterative-log-heuristic) which does not gaurantee that the minimum found is global.)
 
-The subroutine `equiprob(adm, test, k, 'I')` outputs a valid  verification scheme consisting of $k$ Pauli measurement settings (if it exists) with equal probabilities. Replace `I` by `X`, `Y`, or `Z` to exclude the respective Pauli measurement.
+The subroutine `equiprob(adm, test, k, 'I')` outputs a valid  verification scheme consisting of k Pauli measurement settings (if it exists) with equal probabilities. Replace `I` by `X`, `Y`, or `Z` to exclude the respective Pauli measurement.
 
-The minimum number of measurement settings required to verify a graph state $|G\rangle$, can be found by iterating `equiprob` over k up to the minimum chromatic number of G under local Clifford transformations. (See ection VII of the [paper](https://arxiv.org/abs/2007.09713).) If the choice of Pauli measurements for each party is limited to two, use `localCover2(G)` instead.
+The minimum number of measurement settings required to verify a graph state |G⟩, can be found by iterating `equiprob` over k up to the minimum chromatic number of G under local Clifford transformations. (See ection VII of the [paper](https://arxiv.org/abs/2007.09713).) If the choice of Pauli measurements for each party is limited to two, use `localCover2(G)` instead.
 
 (In principle, k is at most the chromatic number of the graph, but I use [SageMath](https://doc.sagemath.org/html/en/reference//graphs/index.html) to find the chromatic number and did not include the algorithm in the module.)
