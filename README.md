@@ -24,7 +24,7 @@ A = nx.to_numpy_array(graph,nodelist=sorted(graph.nodes()))
 [adm, test] = gv.admissible(A)
 ```
 
-`gv.optimal(test)` outputs the optimal spectral gap and an associated (non-unique) optimal measurement scheme. The number of settings may be reduced somewhat by using `gv.minSet(test,ν)` given a fixed spectral gap ν. (Minimizing the number of settings is equivalent to minimizing an l_0 norm which is not convex, so one has to rely on a [heuristic](https://www.cvxpy.org/examples/applications/sparse_solution.html#iterative-log-heuristic) which does not gaurantee that the minimum found is global.)
+`gv.optimal(test)` outputs the optimal spectral gap and an associated (non-unique) optimal measurement scheme. The number of settings may be reduced somewhat by using `gv.minSet(test,nu)` given a fixed spectral gap ν. (Minimizing the number of settings is equivalent to minimizing an l_0 norm which is not convex, so one has to rely on a [heuristic](https://www.cvxpy.org/examples/applications/sparse_solution.html#iterative-log-heuristic) which does not gaurantee that the minimum found is global.)
 
 The subroutine `equiprob(adm, test, k, 'I')` outputs a valid  verification scheme consisting of k Pauli measurement settings (if it exists) with equal probabilities. Replace `I` by `X`, `Y`, or `Z` to exclude the respective Pauli measurement.
 
